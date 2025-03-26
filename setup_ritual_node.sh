@@ -3,17 +3,14 @@
 # 脚本名称：setup_ritual_node.sh
 # 用途：自动化设置 Ritual Infernet 节点并完成后续调用
 
-
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
-
 
 if [ "$EUID" -ne 0 ]; then
     echo -e "${RED}错误：请以 root 用户或使用 sudo 运行此脚本${NC}"
     exit 1
 fi
-
 
 echo -e "${GREEN}=== 配置 Ritual 节点安装参数 ===${NC}"
 read -p "请输入您的私钥（建议使用丢弃钱包，需以 0x 开头，仅限十六进制字符）： " PRIVATE_KEY
@@ -27,20 +24,19 @@ if [[ ! "$PRIVATE_KEY" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
     exit 1
 fi
 
-read -p "请输入 Docker Compose 版本（默认 v2.29.2，按 Enter 使用默认值）： " DOCKER_COMPOSE_VERSION
-DOCKER_COMPOSE_VERSION=${DOCKER_COMPOSE_VERSION:-"v2.29.2"}
+# 新增：输入 RPC URL（默认使用 https://mainnet.base.org/）
+read -p "请输入 RPC URL（默认 https://mainnet.base.org/，直接回车使用默认）： " RPC_URL
+RPC_URL=${RPC_URL:-"https://mainnet.base.org/"}
 
-read -p "请输入 Infernet 节点版本（默认 1.4.0，按 Enter 使用默认值）： " NODE_VERSION
-NODE_VERSION=${NODE_VERSION:-"1.4.0"}
-
+# Docker Compose 与 Infernet 节点版本直接使用默认值，不再提示用户
+DOCKER_COMPOSE_VERSION="v2.29.2"
+NODE_VERSION="1.4.0"
 
 REPO_DIR="$HOME/infernet-container-starter"
-RPC_URL="https://mainnet.base.org/"
 COORDINATOR_ADDRESS="0x8D871Ef2826ac9001fB2e33fDD6379b6aaBF449c"
 REGISTRY_ADDRESS="0x3B1554f346DFe5c482Bb4BA31b880c1C18412170"
 
 echo -e "${GREEN}=== 开始设置 Ritual Infernet 节点 ===${NC}"
-
 
 echo -e "${GREEN}安装构建工具和软件${NC}"
 echo "检查软件包更新..."
@@ -102,7 +98,6 @@ else
     usermod -aG docker $USER
 fi
 
-
 echo -e "${GREEN}克隆 Ritual 起始仓库${NC}"
 if [ -d "$REPO_DIR" ] && [ -f "$REPO_DIR/deploy/docker-compose.yaml" ]; then
     echo "仓库已存在且完整，跳过克隆..."
@@ -122,7 +117,6 @@ docker run -d --name hello-world ritualnetwork/hello-world-infernet:latest 2>&1 
 echo "容器部署日志保存到 $REPO_DIR/container.log"
 cat "$REPO_DIR/container.log"
 
-
 echo "检查 hello-world 容器状态..."
 for i in {1..3}; do
     if docker ps | grep -q "hello-world"; then
@@ -138,7 +132,6 @@ for i in {1..3}; do
         fi
     fi
 done
-
 
 echo -e "${GREEN}配置节点${NC}"
 CONFIG_FILES=(
@@ -171,10 +164,10 @@ RPC_URL := $RPC_URL
 PRIVATE_KEY := $PRIVATE_KEY
 
 deploy:
-    forge script script/Deploy.s.sol --rpc-url \$(RPC_URL) --private-key \$(PRIVATE_KEY) --broadcast -vvvv
+	forge script script/Deploy.s.sol --rpc-url \$(RPC_URL) --private-key \$(PRIVATE_KEY) --broadcast -vvvv
 
 call-contract:
-    forge script script/CallContract.s.sol --rpc-url \$(RPC_URL) --private-key \$(PRIVATE_KEY) --broadcast -vvvv
+	forge script script/CallContract.s.sol --rpc-url \$(RPC_URL) --private-key \$(PRIVATE_KEY) --broadcast -vvvv
 EOF
 chmod 644 "$MAKEFILE"
 if ! grep -q "forge script" "$MAKEFILE"; then
@@ -190,6 +183,8 @@ sed -i '/restart:/d' "$DOCKER_COMPOSE_YAML"
 sed -i '/on-failure/d' "$DOCKER_COMPOSE_YAML"
 sed -i '/image: ritualnetwork\/infernet-node/a \ \ \ \ restart: on-failure' "$DOCKER_COMPOSE_YAML"
 
+# 新增：将 docker-compose.yaml 中的端口映射由 4000 修改为 4888（宿主机端口），容器端口仍为 4000
+sed -i 's/0\.0\.0\.0:4000:4000/0.0.0.0:4888:4000/g' "$DOCKER_COMPOSE_YAML"
 
 echo -e "${GREEN}应用新配置${NC}"
 echo "调试：显示更新后的 $DOCKER_COMPOSE_YAML 内容："
@@ -202,7 +197,6 @@ echo "清理残留容器..."
 docker rm -f infernet-node infernet-redis infernet-fluentbit infernet-anvil 2>/dev/null || true
 echo "启动 Docker Compose 服务..."
 docker compose -f "$DOCKER_COMPOSE_YAML" up -d || { echo -e "${RED}Docker Compose 启动失败${NC}"; exit 1; }
-
 
 echo -e "${GREEN}安装 Foundry${NC}"
 if command -v forge >/dev/null 2>&1; then
@@ -253,9 +247,7 @@ else
     exit 1
 fi
 
-
 echo -e "${GREEN}=== 执行后续步骤 ===${NC}"
-
 
 echo -e "${GREEN}检查节点日志${NC}"
 docker logs infernet-node > "$REPO_DIR/infernet-node.log" 2>&1
@@ -265,7 +257,6 @@ else
     echo -e "${RED}获取节点日志失败，请检查 Docker 服务${NC}"
 fi
 
-
 echo -e "${GREEN}检查容器状态${NC}"
 docker ps -a > "$REPO_DIR/docker-ps.log" 2>&1
 if [ $? -eq 0 ]; then
@@ -273,7 +264,6 @@ if [ $? -eq 0 ]; then
 else
     echo -e "${RED}获取容器状态失败，请检查 Docker 服务${NC}"
 fi
-
 
 echo -e "${GREEN}步骤 3：提取部署地址${NC}"
 DEPLOYED_ADDRESS=$(grep "Deployed SaysHello:" "$REPO_DIR/deploy.log" | tail -1 | awk '{print $NF}')
@@ -283,7 +273,6 @@ else
     echo -e "${RED}无法从 deploy.log 中提取合约地址${NC}"
     exit 1
 fi
-
 
 echo -e "${GREEN}更新 CallContract.s.sol${NC}"
 CALL_CONTRACT_FILE="$REPO_DIR/projects/hello-world/contracts/script/CallContract.s.sol"
@@ -315,7 +304,6 @@ else
     exit 1
 fi
 
-
 echo -e "${GREEN}调用合约${NC}"
 cd "$REPO_DIR/projects/hello-world/contracts" || { echo -e "${RED}无法进入合约目录${NC}"; exit 1; }
 forge script script/CallContract.s.sol --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --broadcast -vvvv 2>&1 | tee "$REPO_DIR/call-contract.log"
@@ -328,7 +316,6 @@ else
     exit 1
 fi
 
-
 echo -e "${GREEN}验证 Docker${NC}"
 docker run hello-world > "$REPO_DIR/docker-hello-world.log" 2>&1
 if grep -q "Hello from Docker!" "$REPO_DIR/docker-hello-world.log"; then
@@ -337,7 +324,6 @@ else
     echo -e "${RED}Docker 验证失败，请检查 Docker 安装${NC}"
     cat "$REPO_DIR/docker-hello-world.log"
 fi
-
 
 echo -e "${GREEN}=== 所有步骤执行完成 ===${NC}"
 echo "节点日志：$REPO_DIR/infernet-node.log"
